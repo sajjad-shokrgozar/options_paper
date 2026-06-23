@@ -1,0 +1,2 @@
+﻿underlying_name,liquidity_rank,no_trade_rate,nobs,peak_lag,peak_corr,granger_underlying_to_option_p,granger_option_to_underlying_p,data_sufficiency,option_information_share_mid,intraday_sufficiency,liquidity_premium_slope,liquidity_premium_p
+اهرم,1,0.5625819612414396,372,0,-0.13281008040549738,0.010993365632393797,0.1740479498970981,OK,0.9931506849315068,OK_PROXY_ONLY,2639.8105313392234,0.0

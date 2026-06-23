@@ -1,0 +1,20 @@
+data_root: ".."
+output_dir: "outputs"
+day_count: 365
+ann_factor: 252
+risk_free_default: 0.34
+iv_bounds: [0.001, 5.0]
+min_option_price: 1.0
+resample_grid_seconds: 60
+lob:
+  max_files_per_instrument: 8
+  cache_dir: "outputs/cache/lob_daily"
+  min_q3_pairs: 30
+  min_intraday_days: 2
+canonical_underlyings:
+  - "اهرم"
+  - "خودرو"
+  - "خساپا"
+  - "شستا"
+  - "وبملت"
+  - "وتجارت"
