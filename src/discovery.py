@@ -2,59 +2,111 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import warnings
-from statsmodels.tsa.stattools import grangercausalitytests
+from .fixes_reference import (
+    price_discovery_daily_by_type,
+    intraday_information_share,
+    lob_file_option_share,
+    drop_unmapped_underlyings,
+)
 
 
 def price_discovery_daily(panel: pd.DataFrame, max_lag: int = 5) -> pd.DataFrame:
-    rows = []
-    for name, g in panel.sort_values("date_dt").groupby("underlying_name"):
-        d = g.loc[(g["moneyness"] - 1).abs().groupby(g["date"]).idxmin().dropna()] if not g.empty else g
-        series = d.groupby("date_dt").agg(underlying_ret=("underlying_log_ret", "first"), option_ret=("option_ret", "median")).dropna()
-        if len(series) < 30:
-            rows.append({"underlying_name": name, "nobs": len(series), "peak_lag": np.nan, "peak_corr": np.nan,
-                         "granger_underlying_to_option_p": np.nan, "granger_option_to_underlying_p": np.nan,
-                         "data_sufficiency": "INSUFFICIENT_DATA"})
-            continue
-        corrs = {}
-        for lag in range(-max_lag, max_lag + 1):
-            if lag < 0:
-                corrs[lag] = series["underlying_ret"].corr(series["option_ret"].shift(-lag))
-            else:
-                corrs[lag] = series["underlying_ret"].shift(lag).corr(series["option_ret"])
-        peak_lag = max(corrs, key=lambda k: abs(corrs[k]) if pd.notna(corrs[k]) else -1)
-        p_uo = np.nan
-        p_ou = np.nan
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", FutureWarning)
-                p_uo = grangercausalitytests(series[["option_ret", "underlying_ret"]], maxlag=min(3, len(series)//10), verbose=False)[1][0]["ssr_ftest"][1]
-                p_ou = grangercausalitytests(series[["underlying_ret", "option_ret"]], maxlag=min(3, len(series)//10), verbose=False)[1][0]["ssr_ftest"][1]
-        except Exception:
-            pass
-        rows.append({"underlying_name": name, "nobs": len(series), "peak_lag": peak_lag, "peak_corr": corrs[peak_lag],
-                     "granger_underlying_to_option_p": p_uo, "granger_option_to_underlying_p": p_ou,
-                     "data_sufficiency": "OK"})
-    return pd.DataFrame(rows)
+    """
+    P1: lead-lag computed SEPARATELY for calls and puts (type-consistent series).
+
+    The old implementation selected the single nearest-ATM contract per date and
+    pooled calls and puts, causing the option-return series to randomly switch
+    sign regime day to day (negative peak_corr = -0.13 was a symptom of this).
+
+    Now each (underlying_name, opt_type) gets its own volume-weighted near-ATM
+    return series; puts are also reported sign-flipped so both types have the
+    same expected contemporaneous sign as the underlying.
+
+    peak_lag = 0 means the strongest association is contemporaneous, i.e. no
+    daily lead-lag was detected. Do not describe this as "the underlying leads."
+    """
+    return price_discovery_daily_by_type(panel, max_lag=max_lag)
 
 
 def intraday_stub(lob_daily: pd.DataFrame, cfg: dict) -> pd.DataFrame:
-    if lob_daily is None or lob_daily.empty:
-        return pd.DataFrame([{"underlying_name": "ALL", "n_lob_days": 0, "option_information_share_mid": np.nan, "data_sufficiency": "INSUFFICIENT_DATA"}])
-    rows = []
-    for name, g in lob_daily.groupby("underlying_name", dropna=False):
-        days = g["date"].nunique()
-        status = "OK_PROXY_ONLY" if days >= cfg.get("lob", {}).get("min_intraday_days", 2) else "INSUFFICIENT_DATA"
-        opt = g[g["opt_type"].isin(["call", "put"])]
-        und = g[g["opt_type"].eq("underlying")]
-        proxy = len(opt) / max(1, len(opt) + len(und)) if len(g) else np.nan
-        rows.append({"underlying_name": name, "n_lob_days": days, "option_information_share_mid": proxy, "data_sufficiency": status})
-    return pd.DataFrame(rows)
+    """
+    P2/P7: honest data-coverage descriptor + guarded information-share estimate.
+
+    The old code computed len(opt) / (len(opt) + len(und)) and mislabelled it
+    option_information_share_mid. That is a file-count ratio, not a Hasbrouck
+    or Gonzalo-Granger share.
+
+    Now:
+      - lob_file_option_share: DATA-COVERAGE descriptor only (fraction of LOB
+        rows belonging to option instruments).
+      - gg_option_share: real GG component share, returned as NaN with
+        INSUFFICIENT_DATA until synchronized underlying-option intraday midpoints
+        can be built. Never a placeholder number.
+
+    P7: drop_unmapped_underlyings removes the phantom NaN-named group that arose
+    because the underlying's own LOB folders had no underlying_name assigned.
+    """
+    if lob_daily is not None and not lob_daily.empty:
+        lob_daily = drop_unmapped_underlyings(lob_daily)  # P7
+
+    coverage = lob_file_option_share(lob_daily)
+    # No synchronized underlying-option intraday frame available yet.
+    # intraday_information_share(None) returns a single "ALL" placeholder row;
+    # we use a LEFT join so only real underlyings from coverage are kept.
+    is_share = intraday_information_share(None)
+
+    if coverage.empty:
+        return is_share
+
+    out = coverage.merge(
+        is_share[["underlying_name", "gg_option_share", "data_sufficiency"]],
+        on="underlying_name",
+        how="left",
+    )
+    # Fill missing data_sufficiency for underlyings not in is_share
+    if "data_sufficiency" not in out.columns:
+        out["data_sufficiency"] = "INSUFFICIENT_DATA"
+    else:
+        out["data_sufficiency"] = out["data_sufficiency"].fillna("INSUFFICIENT_DATA")
+    if "gg_option_share" not in out.columns:
+        out["gg_option_share"] = float("nan")
+    return out
 
 
-def cross_section(daily: pd.DataFrame, intraday: pd.DataFrame, ranking: pd.DataFrame, q2_by: pd.DataFrame) -> pd.DataFrame:
-    out = ranking[["underlying_name", "liquidity_rank", "no_trade_rate"]].merge(daily, on="underlying_name", how="left")
-    if not intraday.empty:
-        out = out.merge(intraday[["underlying_name", "option_information_share_mid", "data_sufficiency"]].rename(columns={"data_sufficiency": "intraday_sufficiency"}), on="underlying_name", how="left")
-    prem = q2_by[q2_by["term"].eq("daily_spread_proxy")][["underlying_name", "coef", "p_value"]].rename(columns={"coef": "liquidity_premium_slope", "p_value": "liquidity_premium_p"})
+def cross_section(
+    daily: pd.DataFrame,
+    intraday: pd.DataFrame,
+    ranking: pd.DataFrame,
+    q2_by: pd.DataFrame,
+) -> pd.DataFrame:
+    # P1: daily now has one row per (underlying_name, opt_type).
+    # Use calls for the cross-section summary (positive expected sign).
+    if "opt_type" in daily.columns:
+        daily_cs = daily[daily["opt_type"].eq("call")]
+    else:
+        daily_cs = daily
+
+    keep_daily = ["underlying_name", "peak_corr", "data_sufficiency"]
+    if "peak_corr_signed" in daily_cs.columns:
+        keep_daily.append("peak_corr_signed")
+
+    out = ranking[["underlying_name", "liquidity_rank", "no_trade_rate"]].merge(
+        daily_cs[keep_daily], on="underlying_name", how="left"
+    )
+
+    if intraday is not None and not intraday.empty:
+        keep_intra = ["underlying_name"]
+        for col in ("lob_file_option_share", "gg_option_share", "data_sufficiency"):
+            if col in intraday.columns:
+                keep_intra.append(col)
+        out = out.merge(
+            intraday[keep_intra].rename(columns={"data_sufficiency": "intraday_sufficiency"}),
+            on="underlying_name",
+            how="left",
+        )
+
+    prem = (
+        q2_by[q2_by["term"].eq("daily_spread_proxy")][["underlying_name", "coef", "p_value"]]
+        .rename(columns={"coef": "liquidity_premium_slope", "p_value": "liquidity_premium_p"})
+    )
     return out.merge(prem, on="underlying_name", how="left")

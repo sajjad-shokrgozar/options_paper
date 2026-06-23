@@ -1,2 +1,2 @@
-﻿underlying_name,paired_obs,roughness_close,roughness_mid,roughness_improvement,stale_close_share,data_sufficiency,liquidity_rank,no_trade_rate
-اهرم,285,0.3056099575051767,0.08529699250604936,0.22031296499912736,0.4631578947368421,OK,1,0.5625819612414396
+﻿underlying_name,paired_obs,paired_obs_nonstale,roughness_close,roughness_mid,roughness_improvement,roughness_close_ns,roughness_mid_ns,roughness_improvement_ns,stale_close_share,data_sufficiency,liquidity_rank,no_trade_rate
+اهرم,285,153,0.651579946703887,0.4173193446102683,0.23426060209361865,0.6448557467399277,0.7231671534102402,-0.07831140667031244,0.4631578947368421,OK,1,0.5625819612414396

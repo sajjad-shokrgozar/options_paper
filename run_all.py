@@ -11,7 +11,7 @@ from src.io_load import load_options, load_underlyings, build_instrument_master,
 from src.lob import build_lob_daily
 from src.panel import build_panel
 from src.pricing_bs import add_pricing_columns
-from src.parity import add_parity_and_bounds
+from src.parity import add_parity_and_bounds, run_parity_sensitivity
 from src.liquidity import liquidity_tables
 from src.regression import run_q2
 from src.discovery import price_discovery_daily, intraday_stub, cross_section
@@ -63,17 +63,23 @@ def main() -> None:
     write(master, tables / "instrument_master.csv")
     write(parity_table, tables / "parity_violations.csv")
 
+    # P8: parity violation rate as a function of r and stale/non-stale split
+    parity_sensitivity = run_parity_sensitivity(panel)
+    write(parity_sensitivity, tables / "parity_violations_sensitivity.csv")
+
     contract_liq, daily_liq, ranking = liquidity_tables(panel)
     write(contract_liq, tables / "contract_liquidity.csv")
     write(daily_liq, tables / "daily_liquidity.csv")
     write(ranking, tables / "underlying_liquidity_ranking.csv")
 
-    q2_daily, q2_lob, q2_by, q2_inter = run_q2(panel, ranking)
+    # P3/P4/P5: clustered SEs, winsorized DV, identification-clean spec
+    q2_daily, q2_lob, q2_by, q2_inter = run_q2(panel, ranking, cfg)
     write(q2_daily, tables / "q2_liquidity_premium_daily.csv")
     write(q2_lob, tables / "q2_liquidity_premium_lob.csv")
     write(q2_by, tables / "q2_by_underlying.csv")
     write(q2_inter, tables / "q2_liquidity_interaction.csv")
 
+    # P1: price_discovery_daily now returns one row per (underlying, opt_type)
     disc_daily = price_discovery_daily(panel)
     disc_intraday = intraday_stub(lob_daily, cfg)
     disc_cross = cross_section(disc_daily, disc_intraday, ranking, q2_by)
@@ -81,6 +87,7 @@ def main() -> None:
     write(disc_intraday, tables / "price_discovery_intraday.csv")
     write(disc_cross, tables / "price_discovery_cross_section.csv")
 
+    # P6: iv_quality now reports full-sample and non-stale-subset roughness
     q3, q3_imp = iv_quality(panel, ranking, cfg)
     write(q3, tables / "q3_iv_quality.csv")
     write(q3_imp, tables / "q3_improvement_vs_liquidity.csv")
@@ -112,7 +119,7 @@ def main() -> None:
         "## Liquidity Ranking",
         markdown_table(ranking),
         "",
-        "## Price Discovery Daily",
+        "## Price Discovery Daily (per type)",
         markdown_table(disc_daily),
         "",
         "## Data Sufficiency",
@@ -120,8 +127,23 @@ def main() -> None:
         "",
         "## Notes",
         "- Dividend yield is set to q=0 as specified.",
-        "- Daily Q2 uses realized-volatility Black-Scholes deviations and daily high-low spread proxies.",
-        "- LOB-heavy claims are flagged when midpoint pairs or synchronized intraday data are too sparse.",
+        "- Q1 lead-lag is computed separately for calls and puts (P1 fix). peak_lag=0",
+        "  means strongest association is contemporaneous; no daily lead-lag detected.",
+        "  Do not describe as 'the underlying leads'.",
+        "- Q2 uses winsorized relative deviation (1/99th pct within underlying) as DV,",
+        "  with a tick_floor so deep-OTM cheap options do not dominate. Stale-close",
+        "  rows are excluded. Standard errors are clustered by (contract, date).",
+        "  See config.yaml [regression] for floor, winsorization, and cluster settings.",
+        "- No column named *information_share* holds a file-count ratio. lob_file_option_share",
+        "  is a data-coverage descriptor only. gg_option_share is NaN / INSUFFICIENT_DATA",
+        "  until synchronized intraday underlying-option midpoints are available.",
+        "- Q3 roughness reported full-sample AND non-stale subset (P6 fix). The",
+        "  'midpoint is cleaner' claim requires improvement to persist on non-stale rows.",
+        "- Parity violation rate shown at r in {0.28, 0.34, 0.40} and stale/non-stale",
+        "  split (P8 fix). The 24% figure is rate-sensitive until Main_DataBase.xlsx",
+        "  is supplied. See parity_violations_sensitivity.csv.",
+        "- LOB-heavy claims are flagged INSUFFICIENT_DATA when midpoint pairs or",
+        "  synchronized intraday data are too sparse.",
     ]
     (out / "run_report.md").write_text("\n".join(report), encoding="utf-8")
     print(f"panel rows={len(panel)} underlyings={panel['underlying_name'].nunique()} outputs={out}")

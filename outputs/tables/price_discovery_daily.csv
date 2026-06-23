@@ -1,2 +1,3 @@
-﻿underlying_name,nobs,peak_lag,peak_corr,granger_underlying_to_option_p,granger_option_to_underlying_p,data_sufficiency
-اهرم,372,0,-0.13281008040549738,0.010993365632393797,0.1740479498970981,OK
+﻿underlying_name,opt_type,nobs,peak_lag,peak_corr,peak_corr_signed,granger_underlying_to_option_p,granger_option_to_underlying_p,data_sufficiency
+اهرم,call,365,-3,-0.0676618774705608,-0.0676618774705608,0.8355005812974379,0.43341441267703107,OK
+اهرم,put,365,-5,-0.06439022257794505,0.06439022257794505,0.9672725520693587,0.7806330945464726,OK

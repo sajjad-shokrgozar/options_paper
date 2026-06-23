@@ -11,6 +11,15 @@ lob:
   cache_dir: "outputs/cache/lob_daily"
   min_q3_pairs: 30
   min_intraday_days: 2
+# P3/P4: DV construction and SE clustering for Q2 regressions
+regression:
+  tick_floor: 1.0        # minimum close price (rial) used as denominator floor
+  winsor_lo: 0.01        # lower winsorization percentile for rel_dev within underlying
+  winsor_hi: 0.99        # upper winsorization percentile for rel_dev within underlying
+  cluster_cols:          # two-way clustering dimensions for SEs
+    - "id"
+    - "date"
+  min_obs: 50            # minimum observations required to fit a regression
 canonical_underlyings:
   - "اهرم"
   - "خودرو"
